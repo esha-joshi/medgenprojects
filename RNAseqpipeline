@@ -1,0 +1,174 @@
+
+Batch scripts for hisat2
+
+#!/bin/bash
+#SBATCH --nodes=8
+#SBATCH —-time=04:00:00
+#SBATCH —-ntasks-per-node=16
+#SBATCH --job-name=hisatloop
+module load gcc/7.3.0
+module load hisat2
+RNAINDEX=/scratch/t/teachmmg3003/mmg3003student007/RNA_REF_INDEX/grch38_snp_tran/genome_snp_tran
+FASTDIR=/scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA
+cd $FASTDIR
+
+for f in `ls *.fastq.gz | sed 's/_[12].fastq.gz//g'| sort -u`
+do
+
+hisat2 -p 8 --rg-id=${f} --rg SM:${f} --rg PL:ILLUMINA -x $RNAINDEX --dta --rna-strandness RF -1 $FASTDIR/${f}_1.fastq.gz -2 $FASTDIR/${f}_2.fastq.gz -S ./${f}.sam
+
+done
+
+sbatch --chdir=$SCRATCH/AIRWAY_DATA ./batch1_hisat.sh
+
+#!/bin/bash
+#SBATCH --nodes=8
+#SBATCH —-time=04:00:00
+#SBATCH --ntasks-per-node=8
+#SBATCH --job-name=hisatalignmentb
+
+cd /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA
+module load gcc/7.3.0
+module load hisat2
+
+hisat2 -p 8 --rg-id=N052611_untreated --rg SM:N052611_untreated --rg PL:ILLUMINA -x /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_INDEX/grch38_snp_tran/genome_snp_tran --dta --rna-strandness RF -1 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N052611_untreated_1.fastq.gz -2 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N052611_untreated_2.fastq.gz -S ./N052611_untreated.sam \
+
+hisat2 -p 8 --rg-id=N052611_dex --rg SM:N052611_dex --rg PL:ILLUMINA -x /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_INDEX/grch38_snp_tran/genome_snp_tran --dta --rna-strandness RF -1 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N052611_dex_1.fastq.gz -2 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N052611_dex_2.fastq.gz -S ./N052611_dex.sam \
+
+hisat2 -p 8 --rg-id=N08611_untreated --rg SM:N08611_untreated --rg PL:ILLUMINA -x /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_INDEX/grch38_snp_tran/genome_snp_tran --dta --rna-strandness RF -1 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N08611_untreated_1.fastq.gz -2 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N08611_untreated_2.fastq.gz -S ./N08611_untreated.sam \
+
+hisat2 -p 8 --rg-id=N08611_dex --rg SM:N08611_dex --rg PL:ILLUMINA -x /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_INDEX/grch38_snp_tran/genome_snp_tran --dta --rna-strandness RF -1 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N08611_dex_1.fastq.gz -2 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N08611_dex_2.fastq.gz -S ./N08611_dex.sam \
+
+hisat2 -p 8 --rg-id=N61311_untreated --rg SM:N61311_untreated --rg PL:ILLUMINA -x /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_INDEX/grch38_snp_tran/genome_snp_tran --dta --rna-strandness RF -1 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N61311_untreated_1.fastq.gz -2 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N61311_untreated_2.fastq.gz -S ./N61311_untreated.sam \
+
+hisat2 -p 8 --rg-id=N61311_dex --rg SM:N61311_dex --rg PL:ILLUMINA -x /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_INDEX/grch38_snp_tran/genome_snp_tran --dta --rna-strandness RF -1 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N61311_dex_1.fastq.gz -2 /scratch/t/teachmmg3003/mmg3003student007/AIRWAY_DATA/N61311_dex_2.fastq.gz -S ./N61311_dex.sam \
+
+Converting to bam files
+#!/bin/bash
+#SBATCH --nodes=8
+#SBATCH —-time=04:00:00
+#SBATCH --ntasks-per-node=8
+#SBATCH --job-name=bamconvert
+module load gcc/7.3.0
+module load samtools/1.8 
+
+samtools sort -@ 8 -n -o N052611_untreated.bam N052611_untreated.sam \
+samtools sort -@ 8 -n -o N052611_dex.bam N052611_dex.sam \
+samtools sort -@ 8 -n -o N08611_untreated.bam N08611_untreated.sam \
+samtools sort -@ 8 -n -o N08611_dex.bam N08611_dex.sam \
+samtools sort -@ 8 -n -o N61311_untreated.bam N61311_untreated.sam \
+samtools sort -@ 8 -n -o N61311_dex.bam N61311_dex.sam \
+
+done
+
+Htseq scripts 
+
+#!/bin/bash
+#SBATCH --nodes=8
+#SBATCH --time=04:00:00
+#SBATCH --ntasks-per-node=16
+#SBATCH --job-name=htseqloop
+
+module load anaconda3/5.2.0
+module load htseq
+
+DIR=/scratch/t/teachmmg3003/mmg3003student007/BAMFILES/
+REFINDEX=/scratch/t/teachmmg3003/mmg3003student007/RNA_REF_DIR/Homo_sapiens.GRCh38.86.gtf
+BAMFILES=($(ls $DIR | grep .bam | grep -v bam.bai))
+OUTMAIN=$SCRATCH/HTSEQ_DATA
+mkdir $OUTMAIN
+cd $OUTMAIN
+for BAMFILE in ${BAMFILES[@]}
+do
+	SAMPLENAME=$(echo $BAMFILE | sed 's/.bam//')
+	htseq-count --format bam --order name --mode intersection-strict --stranded reverse --minaqual 1 --type exon --idattr 	gene_id $DIR/$SAMPLENAME.bam $REFINDEX > $SAMPLENAME.tsv \
+
+done
+
+sbatch --chdir=$SCRATCH/AIRWAY_DATA ./batch1_htseq.sh
+
+
+#!/bin/bash
+#SBATCH --nodes=8
+#SBATCH --time=04:00:00
+#SBATCH —-ntasks-per-node=16
+#SBATCH --job-name=htseqcountsb
+
+cd /scratch/t/teachmmg3003/mmg3003student007/HTSEQ_RESULTS
+module load anaconda3/5.2.0
+module load htseq
+
+htseq-count --format bam --order name --mode intersection-strict --stranded reverse --minaqual 1 --type exon --idattr gene_id /scratch/t/teachmmg3003/mmg3003student007/BAMFILES/N052611_untreated.bam /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_DIR/Homo_sapiens.GRCh38.86.gtf > N053611_untreated.tsv \
+
+htseq-count --format bam --order name --mode intersection-strict --stranded reverse --minaqual 1 --type exon --idattr gene_id /scratch/t/teachmmg3003/mmg3003student007/BAMFILES/N052611_dex.bam /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_DIR/Homo_sapiens.GRCh38.86.gtf > N053611_dex.tsv \
+
+htseq-count --format bam --order name --mode intersection-strict --stranded reverse --minaqual 1 --type exon --idattr gene_id /scratch/t/teachmmg3003/mmg3003student007/BAMFILES/N08611_untreated.bam /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_DIR/Homo_sapiens.GRCh38.86.gtf > N08611_untreated.tsv \
+
+htseq-count --format bam --order name --mode intersection-strict --stranded reverse --minaqual 1 --type exon --idattr gene_id /scratch/t/teachmmg3003/mmg3003student007/BAMFILES/N08611_dex.bam /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_DIR/Homo_sapiens.GRCh38.86.gtf > N08611_dex.tsv \
+
+htseq-count --format bam --order name --mode intersection-strict --stranded reverse --minaqual 1 --type exon --idattr gene_id /scratch/t/teachmmg3003/mmg3003student007/BAMFILES/N61311_untreated.bam /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_DIR/Homo_sapiens.GRCh38.86.gtf > N61311_untreated.tsv \
+
+htseq-count --format bam --order name --mode intersection-strict --stranded reverse --minaqual 1 --type exon --idattr gene_id /scratch/t/teachmmg3003/mmg3003student007/BAMFILES/N61311_dex.bam /scratch/t/teachmmg3003/mmg3003student007/RNA_REF_DIR/Homo_sapiens.GRCh38.86.gtf > N61311_dex.tsv \
+
+join N053611_untreated.tsv N08611_untreated.tsv | join - N61311_untreated.tsv | join - N053611_dex.tsv | join - N08611_dex.tsv  | join - N61311_dex.tsv > cell_line_data.tsv \
+
+making file 
+
+echo "GeneID N053611_untreated N08611_untreated N61311_untreated N053611_dex N08611_dex N61311_dex” > sample_headers.txt \
+
+cat header.txt cell_line_data.tsv > cell_line_data_final.tsv \
+
+scp mmg3003student007@teach.scinet.utoronto.ca:/scratch/t/teachmmg3003/mmg3003student007/HTSEQ_RESULTS/cell_line_data_final.tsv ./
+
+
+EdgeR analysis
+#Loading the table into R
+mapping <-  read.table("ENSG_ID2Name.txt", header=FALSE, stringsAsFactors=FALSE, row.names=1)
+genes <- read.table("cell_line_data_final.tsv",  header=TRUE, stringsAsFactors=FALSE, row.names=1)
+genes <- genes[1:58051,] #Removing last 5 rows of quality metrics
+library(edgeR)
+#Filtering so 25% have a count above 25
+quant <- apply(genes,1,quantile,0.75)
+keep <- which((quant >= 25) == 1)
+f_genes <- genes[keep,]
+
+#Making class Labels
+class <- factor( c( rep("treated",3), rep("dex",3) ))
+#Get gene names and change column names 
+g <- rownames(f_genes)
+names(f_genes)[1] <- "Untreated_1"
+names(f_genes)[2] <- "Untreated_2"
+names(f_genes)[3] <- "Untreated_3"
+names(f_genes)[4] <- "Treated_1"
+names(f_genes)[5] <- "Treated_2"
+names(f_genes)[6] <- "Treated_3"
+gene_names <- mapping[g,1]
+#DGE list object 
+DG <- DGEList(counts=f_genes, genes=g, group=class)
+#Getting MDS Plot
+DG <- calcNormFactors(DG)
+plotMDS(DG, method="logFC", xlab="Dimension 1", ylab="Dimension 2", main="Untreated vs Treated Cell Lines")
+
+
+#Getting differentially expressed genes
+DG <- estimateCommonDisp(DG, verbose=TRUE)
+DG <- estimateTagwiseDisp(DG)
+DG <- exactTest(DG)
+topTags(DG)
+de <- decideTests(DG, method = "separate", adjust.method = "fdr", p.value = 0.05)
+summary(de)
+#Matrix of differentially expressed genes
+mat = cbind(
+  g,gene_names,
+  sprintf('%0.3f',log10(DG$table$PValue)),
+  sprintf('%0.3f',DG$table$logFC)
+)[as.logical(de),]
+colnames(mat) = c("Gene", "Gene_Name", "Log10_Pvalue", "Log_fold_change")
+#Order by log fold change
+o <- order(DG$table$logFC[as.logical(de)],decreasing=TRUE)
+mat <- mat[o,]
+#Saving table
+write.table(mat, file="differential_genes.txt", quote=FALSE, row.names=FALSE, sep="\t")
+#Creating a another table for just names of differentially expressed genes
+mat2 <- mat[,2]
+write.table(mat2, file="diff_gene_names.txt", quote=FALSE, row.names=FALSE, sep="\t")
