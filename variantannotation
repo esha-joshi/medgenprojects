@@ -1,0 +1,228 @@
+##############
+### Set-up ###
+##############
+
+# install.packages("BiocManager")
+# BiocManager::install("biomaRt")
+# BiocManager::install("MafDb.TOPMed.freeze5.hg19", version="3.8")
+library(biomaRt)
+library(MafDb.TOPMed.freeze5.hg19)
+library(bedr)
+library(dplyr)
+library(VariantAnnotation)
+
+# setwd("~/Documents/TA/Assignments/R-Assignment")
+
+input.file <- "Primary immunodeficiency.tsv"
+# input.file <- "Congenital muscular dystrophy.tsv"
+
+panel <- read.csv(input.file, stringsAsFactors=F, sep="\t", na.strings=c("","NA"))
+
+mymart <- useMart("ensembl", host="grch37.ensembl.org", dataset="hsapiens_gene_ensembl")
+    # specify GRCh37 because GRCh38 is default
+
+
+#############################
+### Part A: Get bed files ###
+#############################
+
+# bed files are 0-based indexed, so offset coordinates by -1 **
+    # ** actually only the start position is offset by -1, but I didn't explain this
+    # fully, so let's assume for this assignment that both the start and end positions 
+    # are offset by -1
+# bed files are also sorted (arranged from lowest position to highest)
+# must have columns for chromosome, start, stop; can additionally have column for item name
+# column order matters! chr, start, stop, name
+
+# get list of panel gene ensembl IDs for extracting info from biomaRt
+panel.genes <- as.vector(na.omit(panel$EnsemblId.GRch37.))
+    # removes entries in the panel that are not actually genes, if any
+
+# get info for all genes in panel
+panel.bed <- getBM(attributes=c("chromosome_name", "start_position", 
+                             "end_position", "ensembl_gene_id"), 
+                  filters="ensembl_gene_id", values=panel.genes, mart=mymart) %>%
+    arrange(chromosome_name, start_position, end_position) %>%
+    mutate(start_position=start_position - 1, end_position=end_position - 1)
+
+# get info for all exons from all genes in panel
+panel.exons.bed <- getBM(attributes=c("chromosome_name", "exon_chrom_start", 
+                                      "exon_chrom_end", "ensembl_exon_id"), 
+                      filters="ensembl_gene_id", values=panel.genes, mart=mymart) %>%
+    arrange(chromosome_name, exon_chrom_start, exon_chrom_end) %>%
+    mutate(exon_chrom_start=exon_chrom_start - 1, exon_chrom_end=exon_chrom_end - 1)
+    # there should only be one name column, so since we can lookup the gene ID from the 
+    # exon ID, exon ID would be the most appropriate here
+
+# get exons from the single longest coding isoform from the entire gene panel
+panel.longest.coding.bed <- getBM(attributes=c("chromosome_name", "exon_chrom_start", 
+                                               "exon_chrom_end", "ensembl_exon_id", 
+                                               "cds_length", "ensembl_transcript_id"), 
+                        filters="ensembl_gene_id", values=panel.genes, mart=mymart) %>%
+    filter(cds_length == max(cds_length, na.rm=T)) %>%
+    filter(ensembl_transcript_id == unique(ensembl_transcript_id[1])) %>%
+    dplyr::select(-cds_length, -ensembl_transcript_id) %>%
+    arrange(chromosome_name, exon_chrom_start, exon_chrom_end) %>%
+    mutate(exon_chrom_start=exon_chrom_start - 1, exon_chrom_end=exon_chrom_end - 1)
+    # this gets the exon info and coding sequence length from all gene isoforms,
+    # then only those exons that are equal to the longest coding sequence length are kept
+    # if more than one transcript have the longest cds, the first one is chosen
+
+# save bed files
+write.table(panel.bed, "panel.bed", quote=F, row.names=F, col.names=F, sep="\t")
+write.table(panel.exons.bed, "panel.exons.bed", 
+            quote=F, row.names=F, col.names=F, sep="\t")
+write.table(panel.longest.coding.bed, "panel.longest.coding.bed", 
+            quote=F, row.names=F, col.names=F, sep="\t")
+    # bed files are tab-deliniated with no column names
+
+
+##############################
+### Part B: Get fasta file ###
+##############################
+
+# get the coding sequence from the shortest gene (transcript) in the panel
+shortest.gene <- getBM(attributes=c("ensembl_transcript_id", "transcript_length", 
+                                    "coding"), 
+                     filters="ensembl_gene_id", values=panel.genes, mart=mymart) %>%
+    filter(coding != "Sequence unavailable") %>%
+    filter(transcript_length == min(transcript_length, na.rm=T))
+    # not all transcripts make proteins; remove those without coding sequences
+
+# modify gene info to fasta format
+shortest.fa <- getSequence(id=shortest.gene$ensembl_transcript_id[1], 
+                  type="ensembl_transcript_id", 
+                  seqType="coding", mart=mymart)
+
+# save fasta file
+exportFASTA(shortest.fa, file="shortest.gene.fasta")
+
+# alternate way of saving fasta file
+write(paste0(">", shortest.fa$ensembl_transcript_id), "shortest.gene.fasta")
+write(shortest.fa$coding, "shortest.gene.fasta", append=T)
+    # appends coding sequence to the file that was just written containing the gene ID
+    # this adds a new line instead of overwriting the original file
+
+
+###################################################################
+### Part C option i: Filter vcf variants with VariantAnnotation ###
+###################################################################
+
+# Read vcf file into R 
+vcf.file <- "PGPC_0001_S1.flt.subset.vcf.gz"
+tab <- TabixFile(vcf.file)
+variants <- readVcf(tab, 'hg19')
+
+number.variants.pass <- length(which(rowRanges(variants)$FILTER == "PASS"))
+    # 42,535 variants pass
+
+number.variants.pass.expanded <- length(which(rowRanges(expand(variants))$FILTER == "PASS"))
+    # 42,747 variants pass when expanded (one alt allele per variant)
+
+# convert gene panel data back to 1-based indexing for next filtering step
+panel.data <- panel.bed %>%
+    mutate(start_position=start_position + 1, end_position=end_position + 1,
+           chromosome_name=paste0('chr', chromosome_name))
+    # also make chromosome names match the vcf chromosome names
+
+# define gene panel region
+panel.region <- GRanges(seqnames=panel.data$chromosome_name, 
+                  ranges=IRanges(start=panel.data$start_position,
+                                 end=panel.data$end_position,
+                                 names=panel.data$ensembl_gene_id))
+
+# get the intersect of the variants in the vcf that fall within the genes of the panel
+variants.panel <- readVcf(tab, "hg19", param=panel.region) %>%
+    expand() %>%
+    rowRanges()
+    # expand converts the ALT column to a format that can be written to a table
+    # properly (DNAStringSetList to DNAStringSet)
+    # save just the rowRanges portion for easier MAF annotation
+
+variants.tsv <- as.data.frame(variants.panel, row.names=NULL) %>%
+    filter(FILTER == "PASS")
+    # if some variants fall within more than one gene (overlapping genes!), 
+    # row.names=NULL removes the duplicated row names that cause problems
+    # converting to a data frame
+    # keep only variants that passed quality filter
+    
+# save variant file
+write.table(variants.tsv, "variants.tsv", sep="\t", quote=F, row.names=F)
+    # this isn't a particular bioinformatics file format, so order of columns and
+    # column names aren't necessarily important
+    # however it is nice to have some ordering for readability
+
+
+#######################################################################
+### Part C option ii: Filter vcf variants with bedr & GenomicRanges ###
+#######################################################################
+
+# convert gene panel data back to 1-based indexing for next filtering step
+panel.data <- panel.bed %>%
+    mutate(start_position=start_position + 1, end_position=end_position + 1,
+           chromosome_name=paste0('chr', chromosome_name))
+    # also make chromosome names match the vcf chromosome names
+
+# turn the panel data into a GRanges object
+panel.data.ranges <- GRanges(seqnames=panel.data$chromosome_name,
+                             IRanges(start=panel.data$start_position,
+                                     end=panel.data$end_position))
+
+# read vcf
+variants <- read.vcf("PGPC_0001_S1.flt.subset.vcf")$vcf %>%
+    dplyr::select(CHROM, POS, REF, ALT, QUAL, FILTER) %>%
+    rename(chromosome_name=CHROM, start_position=POS)
+    # keep only relevant columns
+    # rename columns to match panel.data
+
+# keep only variants that pass quality filter
+variants.pass <- variants %>%
+    filter(FILTER=="PASS")
+
+number.variants.pass <- nrow(variants.pass)
+    # 42,535 variants pass
+
+# turn the variant data into a GRanges object
+variants.pass.ranges <- GRanges(seqnames=variants.pass$chromosome_name,
+                                IRanges(start=variants.pass$start_position,
+                                        width=nchar(variants.pass$REF)))
+    # using the width option for the REF allele will select the correct end position
+
+# add additional variants columns to the variants GRanges object
+values(variants.pass.ranges) <- cbind(values(variants.pass.ranges), 
+                                      REF=variants.pass$REF,
+                                      ALT=variants.pass$ALT,
+                                      QUAL=variants.pass$QUAL,
+                                      FILTER=variants.pass$FILTER)
+
+# get the intersect of the variants in the vcf that fall within the genes of the panel
+variants.panel <- subsetByOverlaps(GRanges(variants.pass.ranges), 
+                                   GRanges(panel.data.ranges))
+    # this number might be smaller than the number obtained using VariantAnnotation
+    # because GRanges doesn't duplicate variants when it falls within more than one gene
+    # and if a variant has more than one ALT allele, they are not expanded
+    
+# save variant file
+write.table(variants.panel, "variants.tsv", sep="\t", quote=F, row.names=F)
+    # this isn't a particular bioinformatics file format, so order of columns and
+    # column names aren't necessarily important
+    # however it is nice to have some ordering for readability
+
+
+#########################################################
+### Part D: Annotate variants with allele frequencies ###
+#########################################################
+
+# define TopMMED minor allele frequency database
+mafdb <- MafDb.TOPMed.freeze5.hg19
+
+# annotate variants with allele frequencies (if known)
+variants.panel.maf <- gscores(mafdb, GRanges(variants.panel))
+
+# keep only variants with allele frequencies < 1%
+variants.panel.maf.rare <- as.data.frame(variants.panel.maf, row.names=NULL) %>%
+    filter(FILTER  == "PASS" & AF < 0.01)
+
+# save to file
+write.table(variants.panel.maf.rare, "variants.rare.tsv", sep="\t",
+            quote=F, row.names=F)
