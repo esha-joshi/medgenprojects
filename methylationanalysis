@@ -1,0 +1,132 @@
+mkdir -p $SCRATCH/Ref #parents, if folder is there it will give you an error so make parent directories as needed
+cd $SCRATCH/Ref
+#For 21
+wget ftp://ftp.ensembl.org/pub/release-96/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.chromosome.21.fa.gz
+gunzip Homo_sapiens.GRCh38.dna.chromosome.21.fa.gz
+
+module load anaconda3 gcc java fastqc cutadapt trimgalore bwa samtools bwameth htslib methyldackel #load all modules
+bwameth.py index Homo_sapiens.GRCh38.dna.chromosome.21.fa #load software to index the fasta file, rchr = reverse so G to A and fchr - C to T for forward
+scp ~/Desktop/hg38CpgIslandsForChr21.bed mmg3003student007@teach.scinet.utoronto.ca:/scratch/t/teachmmg3003/mmg3003student007/Datasets
+#For 21
+cp -rf /scratch/m/mhoffman/karimzad/newFastqFilesChr21 $SCRATCH
+
+#to trim fastq files 
+mkdir Scripts
+FASTQDIR=$SCRATCH/newFastqFilesChr21 
+FQFOLDERS=($(ls $FASTQDIR)) 
+OUTMAIN=$SCRATCH/trimmedFastqsChr21 
+for FQFOLDER in ${FQFOLDERS[@]} 
+do
+  FQ1=$FASTQDIR/$FQFOLDER/$FQFOLDER\__1.fastq.gz 
+  FQ2=$FASTQDIR/$FQFOLDER/$FQFOLDER\__2.fastq.gz
+  OUTDIR=$OUTMAIN/$FQFOLDER 
+  mkdir -p $OUTDIR 
+  echo -e '#!/bin/sh' > $SCRATCH/Scripts/$FQFOLDER\_TrimGalore.sh 
+  echo "module load anaconda3 gcc java fastqc cutadapt trimgalore bwa samtools bwameth htslib methyldackel" >> $SCRATCH/Scripts/$FQFOLDER\_TrimGalore.sh 
+  echo "trim_galore --fastqc --paired --gzip -o $OUTDIR $FQ1 $FQ2" >> $SCRATCH/Scripts/$FQFOLDER\_TrimGalore.sh 
+  sbatch -c 1 -t 1:00:00 $SCRATCH/Scripts/$FQFOLDER\_TrimGalore.sh
+done
+
+
+
+scp -r mmg3003student007@teach.scinet.utoronto.ca:/scratch/t/teachmmg3003/mmg3003student007/trimmedFastqsChr21/*/*fastqc* ~/Desktop
+
+#Align to BWA Meth 
+REF=$SCRATCH/Ref/Homo_sapiens.GRCh38.dna.chromosome.21.fa
+FASTQDIR=$SCRATCH/trimmedFastqsChr21
+SCRIPTDIR=$SCRATCH/Scripts
+BAMDIR=$SCRATCH/trimmedAlignedBamsChr21
+mkdir -p $SCRIPTDIR
+SAMPLES=($(ls $FASTQDIR))
+for SAMPLE in ${SAMPLES[@]}
+do
+  FQ1=$(ls $FASTQDIR/$SAMPLE | grep val_1.fq.gz)
+  FQ2=$(ls $FASTQDIR/$SAMPLE | grep val_2.fq.gz)
+  echo -e '#!/bin/sh' > $SCRIPTDIR/$SAMPLE\_Align.sh
+  echo "module load anaconda3 gcc java fastqc cutadapt trimgalore bwa samtools bwameth htslib methyldackel" >> $SCRIPTDIR/$SAMPLE\_Align.sh
+  echo "bwameth.py --reference $REF $FASTQDIR/$SAMPLE/$FQ1 $FASTQDIR/$SAMPLE/$FQ2 | samtools view -bS -F 4 > $BAMDIR/$SAMPLE.bam" >> $SCRIPTDIR/$SAMPLE\_Align.sh 
+  sbatch -c 4 -t 4:00:00 $SCRIPTDIR/$SAMPLE\_Align.sh
+done
+#Job numbers: Submitted batch job 47332
+#Submitted batch job 47333
+#Submitted batch job 47334
+#Submitted batch job 47335
+sacct -j 47334 #to find status of job, time elapsed, allocations and overall status of submissions 
+#Sort and index BAM Files
+BAMDIR=$SCRATCH/trimmedAlignedBamsChr21
+BAMFILES=($(ls $BAMDIR | grep .bam | grep -v bam.bai | grep -v sorted)) 
+for BAMFILE in ${BAMFILES[@]}
+do
+  SAMPLENAME=$(echo $BAMFILE | sed 's/.bam//')
+  echo -e '#!/bin/sh' > $SCRATCH/Scripts/$SAMPLENAME\_sortAndIndex.sh
+  echo "module load anaconda3 gcc java fastqc cutadapt trimgalore bwa samtools bwameth htslib methyldackel" >> $SCRATCH/Scripts/$SAMPLENAME\_sortAndIndex.sh
+  echo "samtools sort $BAMDIR/$BAMFILE -o $BAMDIR/$SAMPLENAME\_sorted.bam" >> $SCRATCH/Scripts/$SAMPLENAME\_sortAndIndex.sh
+  echo "samtools index $BAMDIR/$SAMPLENAME\_sorted.bam" >> $SCRATCH/Scripts/$SAMPLENAME\_sortAndIndex.sh
+  sbatch -c 1 -t 1:00:00 $SCRATCH/Scripts/$SAMPLENAME\_sortAndIndex.sh
+done
+#Submitted batch job 47475
+#Submitted batch job 47476
+#Submitted batch job 47477
+#Submitted batch job 47478
+
+#Using MethylDackel to extract methylation counts
+mkdir methylDackelOutputChr21
+BAMDIR=$SCRATCH/trimmedAlignedBamsChr21
+OUTMAIN=$SCRATCH/methylDackelOutputChr21
+BAMFILES=($(ls $BAMDIR | grep sorted | grep -v bai | grep bam))
+REF=$SCRATCH/Ref/Homo_sapiens.GRCh38.dna.chromosome.21.fa
+for BAMFILE in ${BAMFILES[@]}
+do
+  SAMPLENAME=$(echo $BAMFILE | sed 's/_sorted.bam//')
+  OUTDIR=$OUTMAIN/$SAMPLENAME
+  mkdir -p $OUTDIR
+  echo -e '#!/bin/sh' > $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+  echo "module load anaconda3 gcc java fastqc cutadapt trimgalore bwa samtools bwameth htslib methyldackel" >> $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+  echo "MethylDackel extract --fraction --mergeContext $REF $BAMDIR/$BAMFILE -o $OUTDIR/$SAMPLENAME\_" >> $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+  sbatch -c 1 -t 1:00:00 $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+done
+
+BAMDIR=$SCRATCH/trimmedAlignedBamsChr21
+OUTMAIN=$SCRATCH/methylDackelOutputChr21
+BAMFILES=($(ls $BAMDIR | grep sorted | grep -v bai | grep bam))
+REF=$SCRATCH/Ref/Homo_sapiens.GRCh38.dna.chromosome.21.fa
+for BAMFILE in ${BAMFILES[@]}
+do
+  SAMPLENAME=$(echo $BAMFILE | sed 's/_sorted.bam//')
+  OUTDIR=$OUTMAIN/$SAMPLENAME
+  mkdir -p $OUTDIR
+  echo -e '#!/bin/sh' > $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+  echo "module load anaconda3 gcc java fastqc cutadapt trimgalore bwa samtools bwameth htslib methyldackel" >> $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+  echo "MethylDackel extract --fraction --mergeContext $REF $BAMDIR/$BAMFILE -o $OUTDIR/$SAMPLENAME\_" >> $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+  sbatch -c 1 -t 1:00:00 $SCRATCH/Scripts/MethylDackel_$SAMPLENAME.sh
+done
+
+#Submitted batch job 47479
+#Submitted batch job 47480
+#Submitted batch job 47481
+#Submitted batch job 47482
+
+#Need to convert bedgraph to bigwig
+mkdir -p ~/software/bin
+cd ~/software/bin
+wget http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/bedGraphToBigWig
+chmod u+x bedGraphToBigWig
+#File with info for length of each chromosome
+cd ~/software/bin
+wget http://hgdownload.soe.ucsc.edu/admin/exe/linux.x86_64/fetchChromSizes
+chmod u+x fetchChromSizes
+./fetchChromSizes hg38 > $SCRATCH/Ref/hg38.chromsizes
+
+
+
+salloc
+MAINDIR=$SCRATCH/methylDackelOutputChr21
+SAMPLES=($(ls $MAINDIR))
+for SAMPLE in ${SAMPLES[@]}
+do
+  BDG=$(ls $MAINDIR/$SAMPLE | grep bedGraph)
+  BW=$(echo $BDG | sed 's/bedGraph/bigWig/')
+  ~/software/bin/bedGraphToBigWig $MAINDIR/$SAMPLE/$BDG $SCRATCH/Ref/hg38.chromsizes $MAINDIR/$SAMPLE/$BW
+done
+```
+
