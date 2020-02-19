@@ -11,7 +11,7 @@ library(bedr)
 library(dplyr)
 library(VariantAnnotation)
 
-# setwd("~/Documents/TA/Assignments/R-Assignment")
+# setwd("~/Documents/Assignments/VA-Assignment")
 
 input.file <- "Primary immunodeficiency.tsv"
 # input.file <- "Congenital muscular dystrophy.tsv"
